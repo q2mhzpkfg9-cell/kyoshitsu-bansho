@@ -206,6 +206,15 @@
   .btn.ghost{background:#f0f2f7;color:#5d6678}
   .btn.danger{background:#ffecec;color:var(--danger)}
   .modal hr{border:none;border-top:1px solid var(--line);margin:20px 0 4px}
+  .modal details{margin-top:18px;border-top:1px solid var(--line);padding-top:4px}
+  .modal summary{font-size:13px;color:var(--sub);cursor:pointer;padding:9px 0}
+  #memberList{display:flex;flex-direction:column;gap:8px;margin:8px 0 2px}
+  #memberList:empty{display:none}
+  .memberBtn{
+    display:flex;align-items:center;gap:10px;padding:13px 15px;border-radius:12px;
+    background:var(--accent-light);color:var(--accent);font-weight:bold;font-size:15px;text-align:left;
+  }
+  .memberBtn:hover{background:#dde3fb}
   .modal .sec{font-size:13.5px;font-weight:bold;margin-top:18px}
   .smallBtns{display:flex;gap:8px;margin-top:10px}
   .smallBtns .btn{font-size:13px;padding:9px}
@@ -312,6 +321,20 @@
   </div>
 </div>
 
+<!-- はじめまして（初回のみ） -->
+<div class="overlay" id="welcomeOverlay">
+  <div class="modal">
+    <h2>👋 はじめまして！</h2>
+    <p class="hint" id="welcomeHint"></p>
+    <div id="memberList"></div>
+    <label id="welcomeNewLabel">あたらしく参加する（名前を入力）</label>
+    <input type="text" id="welcomeName" placeholder="例：山田">
+    <div class="btnRow">
+      <button class="btn primary" id="welcomeJoin">この名前ではじめる</button>
+    </div>
+  </div>
+</div>
+
 <!-- 設定 -->
 <div class="overlay" id="setOverlay">
   <div class="modal">
@@ -319,29 +342,30 @@
     <label>あなたの名前（メッセージに表示されます）</label>
     <input type="text" id="setName" placeholder="例：山田">
 
-    <hr>
-    <div class="sec">☁️ 共有モード（同僚とリアルタイム同期）</div>
-    <p class="hint" id="cloudStatus"></p>
-    <label>ルームコード（同じコードの人とつながります）</label>
-    <input type="text" id="setRoom" placeholder="例：sakura-shou-2026">
-    <label>Firebase設定（コンソールからコピーして貼り付け）</label>
-    <textarea id="setConfig" placeholder='const firebaseConfig = { apiKey: "...", ... } のかたまりを丸ごと貼り付けてOK'></textarea>
-    <p class="hint">
-      Firebase（Googleのサービス）のプロジェクトを1つ作ると、同僚と同期できるようになります。
-      無料のSparkプランでOK・クレジットカード登録も不要です（写真もデータベース内に直接保存する設計のため）。
-      設定しなければ、この端末だけで使えます。
-    </p>
-    <div class="smallBtns" id="cloudBtns">
-      <button class="btn primary" id="cloudEnable">共有モードを有効にする</button>
-    </div>
+    <details id="advancedSettings">
+      <summary>🔧 くわしい設定（ふだんは触らなくてOK）</summary>
+      <div class="sec">☁️ 共有モード（同僚とリアルタイム同期）</div>
+      <p class="hint" id="cloudStatus"></p>
+      <label>ルームコード（同じコードの人とつながります）</label>
+      <input type="text" id="setRoom" placeholder="例：sakura-shou-2026">
+      <label>Firebase設定（コンソールからコピーして貼り付け）</label>
+      <textarea id="setConfig" placeholder='const firebaseConfig = { apiKey: "...", ... } のかたまりを丸ごと貼り付けてOK'></textarea>
+      <p class="hint">
+        このアプリには共有サーバーの設定が組み込み済みです。ここを変更するのは、
+        自分たちの学校専用のFirebaseプロジェクトに切り替えたい場合だけです。
+      </p>
+      <div class="smallBtns" id="cloudBtns">
+        <button class="btn primary" id="cloudEnable">共有モードを有効にする</button>
+      </div>
 
-    <hr>
-    <div class="sec" id="backupSec">💾 バックアップ（この端末のみモード）</div>
-    <div class="smallBtns" id="backupBtns">
-      <button class="btn ghost" id="exportBtn">書き出す</button>
-      <button class="btn ghost" id="importBtn">読み込む</button>
-      <input type="file" id="importFile" accept="application/json" hidden>
-    </div>
+      <hr>
+      <div class="sec" id="backupSec">💾 バックアップ（この端末のみモード）</div>
+      <div class="smallBtns" id="backupBtns">
+        <button class="btn ghost" id="exportBtn">書き出す</button>
+        <button class="btn ghost" id="importBtn">読み込む</button>
+        <input type="file" id="importFile" accept="application/json" hidden>
+      </div>
+    </details>
 
     <div class="btnRow">
       <button class="btn primary" id="setSave">保存して閉じる</button>
@@ -521,6 +545,12 @@ const cloudBackend = {
       },
       err => console.error('messages', err));
   },
+  async listMembers() {
+    const snap = await this.col('members').get();
+    return snap.docs.map(d => d.data()).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  },
+  async addMember(m) { await this.col('members').doc(m.id).set(m); },
+  async updateMember(m) { await this.col('members').doc(m.id).set(m, { merge: true }); },
   async addChannel(ch) { await this.col('channels').doc(ch.id).set(ch); },
   async updateChannel(ch) { await this.col('channels').doc(ch.id).set(ch, { merge: true }); },
   async deleteChannel(id) {
@@ -650,7 +680,8 @@ function renderMessages() {
       sep.appendChild(el('span', '', dayLabel(m.createdAt)));
       box.appendChild(sep);
     }
-    const own = m.clientId === clientId;
+    // 同じ人が別端末から送っても「自分の発言」になるよう、名簿ID優先で判定する
+    const own = m.memberId ? m.memberId === settings.memberId : m.clientId === clientId;
     const row = el('div', 'msgRow' + (own ? ' own' : ''));
     const col = el('div', 'msgCol');
     if (!own) col.appendChild(el('div', 'author', m.author || '名無し'));
@@ -868,6 +899,7 @@ async function send() {
   const msg = {
     id: uid(), channelId: state.currentChannel,
     author: settings.name || '名無し', clientId,
+    memberId: settings.memberId || null,
     text, images: state.pendingImages.slice(), createdAt: Date.now(),
   };
   state.sending = true;
@@ -919,8 +951,54 @@ function parseFirebaseConfig(text) {
   if (!m) throw new Error('設定のかたまり { ... } が見つかりません');
   return new Function('return (' + m[0] + ')')();
 }
-function openSettings(firstRun) {
-  $('#setTitle').textContent = firstRun ? '👋 はじめまして！' : '⚙️ 設定';
+/* ---- 初回のなまえ登録（名簿から選ぶ / 新規参加） ---- */
+async function showWelcome() {
+  const list = $('#memberList');
+  list.innerHTML = '';
+  $('#welcomeHint').textContent = backend.mode === 'cloud'
+    ? '一覧に自分の名前があればタップ。なければ下に入力してください。'
+    : 'あなたの名前を入力してください（メッセージに表示されます）。';
+  if (backend.mode === 'cloud') {
+    try {
+      (await cloudBackend.listMembers()).forEach(m => {
+        const b = el('button', 'memberBtn', `👤 ${m.name}`);
+        b.addEventListener('click', () => {
+          settings.name = m.name;
+          settings.memberId = m.id;
+          saveSettings();
+          finishWelcome();
+        });
+        list.appendChild(b);
+      });
+    } catch (err) { console.error('members', err); }
+  }
+  if (settings.name) $('#welcomeName').value = settings.name;
+  $('#welcomeOverlay').classList.add('show');
+}
+function finishWelcome() {
+  $('#myName').textContent = '👤 ' + (settings.name || '名前未設定');
+  $('#welcomeOverlay').classList.remove('show');
+}
+$('#welcomeJoin').addEventListener('click', async () => {
+  const name = $('#welcomeName').value.trim();
+  if (!name) { alert('名前を入力してください'); return; }
+  settings.name = name;
+  if (backend.mode === 'cloud') {
+    try {
+      // 同じ名前がすでに名簿にあれば同一人物として扱う（重複登録を防ぐ）
+      let m = (await cloudBackend.listMembers()).find(x => x.name === name);
+      if (!m) {
+        m = { id: uid(), name, createdAt: Date.now() };
+        await cloudBackend.addMember(m);
+      }
+      settings.memberId = m.id;
+    } catch (err) { console.error('join', err); }
+  }
+  saveSettings();
+  finishWelcome();
+});
+
+function openSettings() {
   $('#setName').value = settings.name || '';
   $('#setRoom').value = settings.room || '';
   const shownCfg = settings.firebaseConfig || (backend.mode === 'cloud' ? DEFAULT_FIREBASE_CONFIG : null);
@@ -958,12 +1036,18 @@ function openSettings(firstRun) {
   const showBackup = backend.mode === 'local';
   $('#backupSec').style.display = showBackup ? 'block' : 'none';
   $('#backupBtns').style.display = showBackup ? 'flex' : 'none';
+  $('#advancedSettings').open = false;
   $('#setOverlay').classList.add('show');
-  if (firstRun) setTimeout(() => $('#setName').focus(), 50);
 }
-$('#gearBtn').addEventListener('click', () => openSettings(false));
-$('#setSave').addEventListener('click', () => {
-  settings.name = $('#setName').value.trim();
+$('#gearBtn').addEventListener('click', () => openSettings());
+$('#setSave').addEventListener('click', async () => {
+  const newName = $('#setName').value.trim();
+  if (newName && newName !== settings.name && backend.mode === 'cloud' && settings.memberId) {
+    // 名簿の名前も更新（過去のメッセージの表示名はそのまま）
+    try { await cloudBackend.updateMember({ id: settings.memberId, name: newName }); }
+    catch (err) { console.error('rename', err); }
+  }
+  if (newName) settings.name = newName;
   settings.room = $('#setRoom').value.trim();
   saveSettings();
   $('#myName').textContent = '👤 ' + (settings.name || '名前未設定');
@@ -1014,7 +1098,10 @@ async function start() {
     }
     renderChannels(); renderHeader();
   });
-  if (!settings.name) openSettings(true);
+  const needsWelcome = backend.mode === 'cloud'
+    ? !(settings.name && settings.memberId)
+    : !settings.name;
+  if (needsWelcome) showWelcome();
 }
 start();
 </script>
